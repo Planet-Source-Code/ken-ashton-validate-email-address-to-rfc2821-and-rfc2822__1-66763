@@ -1,0 +1,159 @@
+'******************************************************************************
+'
+' NAME: ValidEm(EmailAddress [,mode])
+'
+' PURPOSE: Validate Email Address Format based on RFC2821 and RFC2822
+'
+' Returns True of False based on -
+' Mode = 0  Recommended safe email format
+' Mode = 1  Prompt user to accept legal, but non-preferrred characters
+' Mode = 2  Accept ALL legal email characters
+'
+' LIMITATIONS: Modes 1,2 which accept ALL legal characters, will not
+' rigidly validate the double-quoting/other or prerequisites of using
+' these characters that are consider normally 'bad to use' and may
+' conflict with software and configurations elsewhere in transmission.
+' The email@[182.43.3.7] method is NOT allowed and validates as false.
+' If this feature is required, un-comment the appropriate code.
+'
+' USAGE: Example Calls for each mode as follows
+'       If ValidEm(email) Then ....         True only if all recommended chars in address
+'       If ValidEm(email, 1) Then ..        True if 'non-recommended' but legal chars in address
+'       If ValidEm(email, 2) Then ..        True for recommended chars, prompts User to call email
+'                                           True or False if 'non-recommended chars' are found
+'
+' REQUIREMENTS: Tailor one constant, set AllowIP = True to allow and validate  me@[1.3.5.7]  as True
+'               Tailor MinExt and MaxExt to control the length of the 'org' part you wish to control
+'               (set both to say 3 if you only want to accept  3 char 'org' (extention)
+' NOTES: This is written for reliability and clarity of code (to identify
+' which characters are considered good/bad and to see how they are handled).
+' Hopefully, this  will make the validator easy to re-tailor in the future
+' and give others 'beginners' like me the opportunity to 'speed-up' the code.
+'
+' Simple loop testing suggests the function validates 10,000 average emails in
+' 450mS which is quick enough for most data entry and general coding purposes.
+'
+' ******************************************************************************
+'
+Function ValidEm(ByVal em As String, Optional Mode As Integer = 0) As Boolean
+    '
+    Dim i As Byte       ' Loop counter
+    Dim pa As Byte      ' Position of @ in email string em
+    Dim pd As Byte      ' Position of Dot (last dot) in string
+    Dim le As Byte      ' Length of Email(length of em)
+    Dim ac As Byte      ' Ascii Current char value
+    Dim al As Byte      ' Ascii Last char value
+    Dim fa As Boolean   ' Found @ Flag
+    Dim fx As Boolean   ' Found Extended chars flag
+    Dim IP As Variant   ' IP address Variant Array
+    '
+    ' Tailor. Set AllowIP to True or False. If AllowIP is True
+    ' the IP addressed emails eg, me@[1.34.2.56] become valid.
+    '
+    Const AllowIP = True    ' Enables and allows me@[1.2.3.4] style IP based email addresses
+    Const MinExt = 2        ' Defines minimum length of domain 'org' part, eg the .to in  me@domain.to
+    Const MaxExt = 4        ' Defines maximum length of domain 'org' part. eg the .info in me@domain.info
+    '
+    ' Do the 'whole EmailAddress' basics first
+    '
+    em = LCase(em)
+    pa = InStr(em, "@")                                     ' Get @ position
+    If pa < 2 Then Exit Function                            ' If '@' missing or is 1st char - Quit
+    le = Len(em)                                            ' Get Length of email string
+    If le < 5 Or le > 255 Then Exit Function                ' Email too Long - Quit
+    pd = InStrRev(em, ".")                                  ' Get last dot in address
+    If pd < pa + 2 Then Exit Function                        ' No valid dot in Domain
+    '
+    '   Now scan the entire email address
+    '
+    For i = 1 To le                                         ' Loop through each character
+        ac = Asc(Mid(em, i, 1))                             ' Get Ascii value of each char
+        Select Case ac
+            Case Is < 38: Exit Function                     ' <ctrl><space>!"#$%
+            Case 38, 39
+                If fa Or Mode = 0 Then Exit Function        ' &' Not allowed in DomainPart, but allowed
+                fx = True                                   ' &' in namepart if in our 'Extended' mode
+            Case 40, 41: Exit Function                      ' )(
+            Case 42                                         ' *
+                If fa Or Mode = 0 Then Exit Function        ' * Not allowed in Domainpart, but allowed
+                fx = True                                   ' * in NamePart if in our 'Extended' mode
+            Case 44: Exit Function                          ' ,
+            Case 45                                         ' -
+                If i > pd Then Exit Function                ' -  Not allowed in domain part extention
+            Case 46                                         ' .
+                If al = 46 Then Exit Function               ' .  If previous char was . its ac dupe
+                If i = 1 Or i = pa - 1 Then Exit Function   ' .  Quit if invalid position in LocalPart
+                If i = pa + 1 Or i = le Then Exit Function  ' .  Quit if invalid position in DomainPart
+            Case 47                                         ' /
+                If fa Or Mode = 0 Then Exit Function        ' / Not allowed in Domainpart, but allowed
+                fx = True                                   ' / in NamePart if in our 'Extended' mode
+            Case 58, 59, 60: Exit Function                  ' :;<
+            Case 61                                         ' =
+                If fa Or Mode = 0 Then Exit Function        ' = Not allowed in Domainpart, but allowed
+                fx = True                                   ' = in NamePart if in our 'Extended' mode
+            Case 62: Exit Function                          ' >
+            Case 63                                         ' ?
+                If fa Or Mode = 0 Then Exit Function        ' ? Not allowed in Domainpart, but allowed
+                fx = True                                   ' ? in NamePart if in our 'Extended' mode
+            Case 64                                         ' @
+                If fa Then Exit Function                    ' @ if fa then its ac duplicate '
+                fa = True                                   ' @ Flag we have reached @
+            Case 91                                         ' [
+                If Not AllowIP Then Exit Function           ' [ Quit if 'allowIP' mode is not enabled
+                If al <> 64 Then Exit Function              ' [ if not right after '@', its bad
+                ' Looks like IP DomainPart, check it out
+                If Mid$(em, le, 1) <> "]" Then Exit Function        ' ] should be last char in email
+                If le - pa < 9 Or le - pa > 16 Then Exit Function   ' [..] quit if too big/small for an IP
+                IP = Split(Mid(em, pa + 2, le - pa - 2), ".")       ' Extract IP to array (split on '.')
+                If UBound(IP) <> 3 Then Exit Function               ' Quit if not 4 octets
+                For pa = 0 To 3                                     ' We have 4 octets, check them
+                    If Not IsNumeric(IP(pa)) Then Exit Function     ' Must be numeric
+                    If Val(IP(pa)) < 0 Or Val(IP(pa)) > 255 Then Exit Function  ' Must be in range 0-255
+                Next                                                ' End of loop, Valid IP if we got here
+                Exit For                                            ' so no need to check further, exit loop
+            Case 92: Exit Function                          ' \
+            Case 93: Exit Function                          ' ]  We already validated if this was ok
+            Case 94                                         ' ^
+                If fa Or Mode = 0 Then Exit Function        ' ^  Not allowed in Domainpart, but allowed
+                fx = True                                   ' ^  in NamePart if in our 'Extended' mode
+            Case 95: If fa Then Exit Function               ' _  not allowed in DomainPart
+            Case 96: Exit Function                          ' ` (backtick)
+            Case 123                                        ' {
+                If fa Or Mode = 0 Then Exit Function        ' {  Not allowed in Domainpart, but allowed
+                fx = True                                   ' {  in NamePart if in our 'Extended' mode
+            Case 124: Exit Function                         ' |
+            Case 125, 126                                   ' }~
+                If fa Or Mode = 0 Then Exit Function        ' }~  Not allowed in Domainpart, but allowed
+                fx = True                                   ' }~  in NamePart if in our 'Extended' mode
+            Case Is > 126: Exit Function                    ' if ~ or Non-Ascii - Quit
+        End Select
+        al = ac                                             ' Set AsciiLast calue to AsciiCurrent value
+    Next
+    '
+    ' If not an IP style email address, check 'org' part is within bounds
+    '
+    If Not IsArray(IP) And MaxExt > 0 And MinExt > 0 And MaxExt >= MinExt Then
+        If le - pd > MaxExt Then Exit Function
+        If le - pd < MinExt Then Exit Function
+    End If
+    '
+    ' Deal with (or let User deal with) any troublesome characters found
+    '
+    If Mode > 0 Then
+        If fx Then
+            If Mode > 1 Then
+                If MsgBox(em & " is using one or more of the [""&'*/=?^{}~] characters!" & vbCrLf & vbCrLf & _
+                "Strictly speaking they are legal and allowed under the RFC2821 and RFC2822 rules," & vbCrLf & _
+                "but you will encounter conflicts with services using them for other purposes)" & vbCrLf & vbCrLf & _
+                "Do you really want to call this email address valid?", vbYesNo) = vbNo Then Exit Function
+            End If
+        End If
+    Else
+        If fx Then Exit Function
+    End If
+'
+    ValidEm = True                                          ' If we reached here, Ok - return True
+'
+End Function
+
+
